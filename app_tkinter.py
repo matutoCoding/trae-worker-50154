@@ -1058,6 +1058,10 @@ class AnimalLabApp(tk.Tk):
         for item in self.history_tree.get_children():
             self.history_tree.delete(item)
 
+        node_names = {'advisor': '导师', 'facility_manager': '管理员', 'ethics_committee': '伦理'}
+        status_map = {'approved': ('✅ 通过', '#5cb85c'), 'rejected': ('❌ 驳回', '#d9534f')}
+
+        rows = []
         try:
             from db.database import SessionLocal
             from models.approval import Approval, ApprovalStatus
@@ -1073,46 +1077,56 @@ class AnimalLabApp(tk.Tk):
                     Approval.status != ApprovalStatus.PENDING
                 ).order_by(Approval.updated_at.desc()).all()
 
-                for a in approvals:
-                    _ = safe_get(a, 'booking', 'cage', 'cage_code')
-                    _ = safe_get(a, 'booking', 'researcher', 'name')
+                for approval in approvals:
+                    try:
+                        booking = safe_get(approval, 'booking')
+
+                        st_val = safe_get(approval, 'status')
+                        try: st_val = st_val.value
+                        except Exception: pass
+                        status_text, _ = status_map.get(str(st_val), (str(st_val), ''))
+
+                        node_val = safe_get(approval, 'node')
+                        try: node_val = node_val.value
+                        except Exception: pass
+
+                        updated = safe_get(approval, 'updated_at')
+                        if isinstance(updated, datetime): updated = updated.strftime('%Y-%m-%d %H:%M')
+
+                        bk_status = safe_get(booking, 'status')
+                        if bk_status:
+                            try: current_text = BookingService.get_booking_status_text(bk_status)
+                            except Exception: current_text = str(bk_status)
+                        else:
+                            current_text = '-'
+
+                        row = (
+                            safe_get(booking, 'id', default=''),
+                            safe_get(booking, 'project_name', default='-'),
+                            node_names.get(str(node_val), str(node_val)),
+                            status_text,
+                            safe_get(approval, 'approver', 'name', default='-'),
+                            updated,
+                            safe_get(approval, 'comments', default='-'),
+                            current_text,
+                        )
+                        rows.append(row)
+                    except Exception as e:
+                        print(f"预处理历史审批项出错: {e}")
+                        continue
             finally:
                 db.close()
         except Exception as e:
             print(f"加载历史审批失败: {e}")
+            import traceback
+            traceback.print_exc()
             return
 
-        node_names = {'advisor': '导师', 'facility_manager': '管理员', 'ethics_committee': '伦理'}
-        status_map = {'approved': ('✅ 通过', '#5cb85c'), ('rejected': ('❌ 驳回', '#d9534f')}
-
-        for approval in approvals:
+        for row in rows:
             try:
-                booking = safe_get(approval, 'booking')
-                st_val = safe_get(approval, 'status')
-                try: st_val = st_val.value
-                except Exception: pass
-
-                status_text, _ = status_map.get(str(st_val), (str(st_val), ''))
-                node_val = safe_get(approval, 'node')
-                try: node_val = node_val.value
-                except Exception: pass
-
-                updated = safe_get(approval, 'updated_at')
-                if isinstance(updated, datetime): updated = updated.strftime('%Y-%m-%d %H:%M')
-
-                self.history_tree.insert('', tk.END,
-                    values=(
-                        safe_get(booking, 'id', default=''),
-                        safe_get(booking, 'project_name', default=''),
-                        node_names.get(str(node_val), str(node_val)),
-                        status_text,
-                        safe_get(approval, 'approver', 'name', default=''),
-                        updated,
-                        safe_get(approval, 'comments', default='-'),
-                        BookingService.get_booking_status_text(safe_get(booking, 'status')) if booking else '-'
-                    ))
+                self.history_tree.insert('', tk.END, values=row)
             except Exception as e:
-                print(f"渲染历史项失败: {e}")
+                print(f"渲染历史项到Treeview失败: {e}")
                 continue
 
     def _on_pending_select(self):

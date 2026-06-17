@@ -538,6 +538,36 @@ def run_all_tests():
 ╚══════════════════════════════════════════════════════════════╝
     """)
 
+    # ---------- [前置校验] 客户端语法 + 核心模块可导入性 ----------
+    test_header("0. 客户端启动前置校验 (失败直接终止)")
+    import py_compile
+    app_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'app_tkinter.py')
+    if not os.path.exists(app_path):
+        fail_test(f"找不到客户端文件: {app_path}")
+    try:
+        py_compile.compile(app_path, doraise=True)
+        print(f"✓ app_tkinter.py 语法解析通过 (py_compile 无错误)")
+    except py_compile.PyCompileError as e:
+        fail_test(f"app_tkinter.py 存在语法错误，请先修复后再跑业务测试！\n  详情: {e}")
+    except Exception as e:
+        fail_test(f"app_tkinter.py 语法检查异常: {e}")
+
+    # 核心模块导入检查 (避免进入业务测试后才发现导入崩)
+    core_modules = [
+        'db.database', 'models.user', 'models.cage', 'models.booking',
+        'models.approval', 'models.access',
+        'services.user_service', 'services.cage_service', 'services.booking_service',
+        'services.conflict_service', 'services.approval_service', 'services.access_service',
+    ]
+    import importlib
+    for mod_name in core_modules:
+        try:
+            importlib.import_module(mod_name)
+        except Exception as e:
+            fail_test(f"核心模块 {mod_name} 导入失败: {e}")
+    print(f"✓ 核心模块导入检查通过 (共 {len(core_modules)} 个模块)")
+    # ----------------------------------------------------------------
+
     # 删除旧数据库确保环境干净
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'animal_lab.db')
     if os.path.exists(db_path):
