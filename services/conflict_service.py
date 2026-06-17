@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List, Optional, Tuple
 from sqlalchemy import and_, or_
+from sqlalchemy.orm import joinedload
 from db.database import SessionLocal
 from models.booking import Booking, BookingStatus
 from models.cage import Cage
@@ -14,7 +15,10 @@ class ConflictService:
     def check_cage_conflict(cage_id: int, start_time: datetime, end_time: datetime, exclude_booking_id: Optional[int] = None) -> List[Booking]:
         db = SessionLocal()
         try:
-            query = db.query(Booking).filter(
+            query = db.query(Booking).options(
+                joinedload(Booking.cage),
+                joinedload(Booking.researcher)
+            ).filter(
                 Booking.cage_id == cage_id,
                 Booking.status.notin_([BookingStatus.REJECTED, BookingStatus.CANCELLED]),
                 or_(
@@ -26,6 +30,11 @@ class ConflictService:
                 query = query.filter(Booking.id != exclude_booking_id)
             
             conflicts = query.all()
+            
+            for b in conflicts:
+                _ = b.cage.cage_code if b.cage else None
+                _ = b.researcher.name if b.researcher else None
+            
             return conflicts
         finally:
             db.close()
@@ -53,12 +62,20 @@ class ConflictService:
     def get_cage_bookings_in_range(cage_id: int, start_date: datetime, end_date: datetime) -> List[Booking]:
         db = SessionLocal()
         try:
-            bookings = db.query(Booking).filter(
+            bookings = db.query(Booking).options(
+                joinedload(Booking.cage),
+                joinedload(Booking.researcher)
+            ).filter(
                 Booking.cage_id == cage_id,
                 Booking.status.notin_([BookingStatus.REJECTED, BookingStatus.CANCELLED]),
                 Booking.start_time < end_date,
                 Booking.end_time > start_date
             ).all()
+            
+            for b in bookings:
+                _ = b.cage.cage_code if b.cage else None
+                _ = b.researcher.name if b.researcher else None
+            
             return bookings
         finally:
             db.close()

@@ -1,5 +1,6 @@
 from typing import List, Optional, Tuple
 from datetime import datetime
+from sqlalchemy.orm import joinedload
 from db.database import SessionLocal
 from models.booking import Booking, BookingStatus
 from services.conflict_service import ConflictService
@@ -13,7 +14,7 @@ class BookingService:
         is_valid, _, message = ConflictService.validate_booking(cage_id, start_time, end_time)
         if not is_valid:
             return False, message, None
-        
+
         db = SessionLocal()
         try:
             booking = Booking(
@@ -29,10 +30,15 @@ class BookingService:
             db.add(booking)
             db.commit()
             db.refresh(booking)
+
+            db.refresh(booking)
+            _ = booking.cage.cage_code if booking.cage else None
+            _ = booking.researcher.name if booking.researcher else None
+
             return True, "预约创建成功", booking
         except Exception as e:
             db.rollback()
-            return False, str(e), None
+            return False, f"创建失败：{str(e)}", None
         finally:
             db.close()
 
@@ -43,31 +49,33 @@ class BookingService:
             booking = db.query(Booking).filter(Booking.id == booking_id).first()
             if not booking:
                 return False, "预约不存在"
-            
+
             if booking.status != BookingStatus.DRAFT:
                 return False, "只有草稿状态的预约可以修改"
-            
+
             cage_id = kwargs.get('cage_id', booking.cage_id)
             start_time = kwargs.get('start_time', booking.start_time)
             end_time = kwargs.get('end_time', booking.end_time)
-            
-            if 'cage_id' in kwargs or 'start_time' in kwargs or 'end_time' in kwargs:
+
+            time_changed = ('cage_id' in kwargs or 'start_time' in kwargs or 'end_time' in kwargs)
+
+            if time_changed:
                 is_valid, _, message = ConflictService.validate_booking(
                     cage_id, start_time, end_time, exclude_booking_id=booking_id
                 )
                 if not is_valid:
                     return False, message
-            
+
             for key, value in kwargs.items():
-                if hasattr(booking, key):
+                if hasattr(booking, key) and key not in ['id', 'created_at']:
                     setattr(booking, key, value)
-            
+
             booking.updated_at = datetime.now()
             db.commit()
             return True, "更新成功"
         except Exception as e:
             db.rollback()
-            return False, str(e)
+            return False, f"更新失败：{str(e)}"
         finally:
             db.close()
 
@@ -78,17 +86,17 @@ class BookingService:
             booking = db.query(Booking).filter(Booking.id == booking_id).first()
             if not booking:
                 return False, "预约不存在"
-            
+
             if booking.status in [BookingStatus.CANCELLED, BookingStatus.REJECTED, BookingStatus.COMPLETED]:
                 return False, "该预约状态不允许取消"
-            
+
             booking.status = BookingStatus.CANCELLED
             booking.updated_at = datetime.now()
             db.commit()
             return True, "预约已取消，时段已释放"
         except Exception as e:
             db.rollback()
-            return False, str(e)
+            return False, f"取消失败：{str(e)}"
         finally:
             db.close()
 
@@ -96,7 +104,18 @@ class BookingService:
     def get_booking_by_id(booking_id: int) -> Optional[Booking]:
         db = SessionLocal()
         try:
-            booking = db.query(Booking).filter(Booking.id == booking_id).first()
+            booking = db.query(Booking).options(
+                joinedload(Booking.cage),
+                joinedload(Booking.researcher),
+                joinedload(Booking.approvals)
+            ).filter(Booking.id == booking_id).first()
+
+            if booking:
+                _ = booking.cage.cage_code if booking.cage else None
+                _ = booking.researcher.name if booking.researcher else None
+                for a in booking.approvals:
+                    _ = a.node.value
+
             return booking
         finally:
             db.close()
@@ -105,9 +124,18 @@ class BookingService:
     def get_bookings_by_researcher(researcher_id: int) -> List[Booking]:
         db = SessionLocal()
         try:
-            bookings = db.query(Booking).filter(
+            bookings = db.query(Booking).options(
+                joinedload(Booking.cage),
+                joinedload(Booking.researcher),
+                joinedload(Booking.approvals)
+            ).filter(
                 Booking.researcher_id == researcher_id
             ).order_by(Booking.created_at.desc()).all()
+
+            for b in bookings:
+                _ = b.cage.cage_code if b.cage else None
+                _ = b.researcher.name if b.researcher else None
+
             return bookings
         finally:
             db.close()
@@ -116,7 +144,16 @@ class BookingService:
     def get_all_bookings() -> List[Booking]:
         db = SessionLocal()
         try:
-            bookings = db.query(Booking).order_by(Booking.created_at.desc()).all()
+            bookings = db.query(Booking).options(
+                joinedload(Booking.cage),
+                joinedload(Booking.researcher),
+                joinedload(Booking.approvals)
+            ).order_by(Booking.created_at.desc()).all()
+
+            for b in bookings:
+                _ = b.cage.cage_code if b.cage else None
+                _ = b.researcher.name if b.researcher else None
+
             return bookings
         finally:
             db.close()
@@ -125,9 +162,18 @@ class BookingService:
     def get_bookings_by_status(status: BookingStatus) -> List[Booking]:
         db = SessionLocal()
         try:
-            bookings = db.query(Booking).filter(
+            bookings = db.query(Booking).options(
+                joinedload(Booking.cage),
+                joinedload(Booking.researcher),
+                joinedload(Booking.approvals)
+            ).filter(
                 Booking.status == status
             ).order_by(Booking.created_at.desc()).all()
+
+            for b in bookings:
+                _ = b.cage.cage_code if b.cage else None
+                _ = b.researcher.name if b.researcher else None
+
             return bookings
         finally:
             db.close()
